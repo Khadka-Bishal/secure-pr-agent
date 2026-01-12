@@ -1,0 +1,15 @@
+# Sandbox Environment
+# This defines the isolated environment where the Agent runs verification tests.
+FROM python:3.9-slim
+
+# Install dependencies that the Agent might use in generated code
+# (e.g. if the Agent generates a test using pytest or numpy)
+RUN pip install --no-cache-dir pytest numpy pandas
+
+# Create a non-root user for security (Standard Best Practice)
+RUN useradd -m sandboxuser
+USER sandboxuser
+WORKDIR /home/sandboxuser
+
+# CMD is handled by runner.py
+# ENTRYPOINT ["python", "-c"]

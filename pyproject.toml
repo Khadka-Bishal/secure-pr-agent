@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "securepragent"
+version = "1.0.0"
+description = "Secure PR Agent"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.0.10",
+    "langchain-core",
+    "openai>=1.0.0",
+    "tiktoken",
+    "docker",
+    "kubernetes",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
+    "chromadb",
+    "sentence-transformers",
+    "opentelemetry-instrumentation-requests",
+    "prometheus_client",
+    "pygithub",
+    "requests",
+    "PyYAML",
+    "litellm",
+    "python-dotenv"
+]
+
+[project.scripts]
+securepragent = "main:main"
