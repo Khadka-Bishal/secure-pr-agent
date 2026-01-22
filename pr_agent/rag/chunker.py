@@ -35,16 +35,22 @@ class CodeChunker:
         if filename.endswith(".py"):
             return self._chunk_python_ast(content, patch)
         elif filename.endswith(".go"):
-            return self._chunk_brace_parsing(content, "go")
+            return self._chunk_brace_parsing(content, "go", patch)
         elif filename.endswith((".js", ".ts", ".jsx", ".tsx")):
-            return self._chunk_brace_parsing(content, "js")
+            return self._chunk_brace_parsing(content, "js", patch)
         else:
             return self._chunk_simple(content)
 
-    def _chunk_brace_parsing(self, content: str, language: str) -> List[Dict[str, str]]:
-        """Chunks C-style languages (Go, JS, TS) using regex and brace counting."""
+    def _chunk_brace_parsing(
+        self, content: str, language: str, patch: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Chunks C-style languages (Go, JS, TS) using regex and brace counting.
+        
+        If patch is provided, only returns chunks containing changed lines.
+        """
         chunks = []
         lines = content.splitlines()
+        changed_lines = self._extract_changed_lines(patch) if patch else None
 
         patterns = {
             "go": [
@@ -65,10 +71,13 @@ class CodeChunker:
 
         current_chunk: List[str] = []
         current_id = "unknown"
+        chunk_start_line = 0
         brace_balance = 0
         in_chunk = False
+        line_num = 0
 
         for line in lines:
+            line_num += 1
             if not in_chunk:
                 match_found = False
                 for p in active_patterns:
@@ -77,6 +86,7 @@ class CodeChunker:
                         current_id = match.group(1)
                         in_chunk = True
                         match_found = True
+                        chunk_start_line = line_num
                         break
 
                 if match_found:
@@ -90,6 +100,14 @@ class CodeChunker:
 
                 if brace_balance <= 0:
                     if current_chunk:
+                        # If patch provided, only include chunks with changes
+                        if changed_lines is not None:
+                            chunk_lines = set(range(chunk_start_line, line_num + 1))
+                            if not chunk_lines.intersection(changed_lines):
+                                in_chunk = False
+                                current_chunk = []
+                                continue
+                        
                         chunks.append(
                             {
                                 "id": current_id,
