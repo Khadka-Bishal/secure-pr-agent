@@ -19,18 +19,21 @@ class CodeChunker:
         """Initialize the CodeChunker."""
         pass
 
-    def chunk_code(self, filename: str, content: str) -> List[Dict[str, str]]:
+    def chunk_code(
+        self, filename: str, content: str, patch: Optional[str] = None
+    ) -> List[Dict[str, str]]:
         """Chunks content based on file extension.
 
         Args:
             filename: The name of the file.
-            content: The file content.
+            content: The file content (full file or patch).
+            patch: Optional patch/diff to identify changed lines.
 
         Returns:
             A list of dictionary chunks.
         """
         if filename.endswith(".py"):
-            return self._chunk_python_ast(content)
+            return self._chunk_python_ast(content, patch)
         elif filename.endswith(".go"):
             return self._chunk_brace_parsing(content, "go")
         elif filename.endswith((".js", ".ts", ".jsx", ".tsx")):
@@ -103,22 +106,36 @@ class CodeChunker:
 
         return chunks
 
-    def _chunk_python_ast(self, content: str) -> List[Dict[str, str]]:
-        """Uses Python's AST to extract functions and classes."""
+    def _chunk_python_ast(
+        self, content: str, patch: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Uses Python's AST to extract functions and classes.
+
+        If patch is provided, extracts changed line numbers and only returns
+        chunks containing those changes.
+        """
         chunks = []
         try:
             tree = ast.parse(content)
+            changed_lines = self._extract_changed_lines(patch) if patch else None
+
             for node in ast.iter_child_nodes(tree):
                 if isinstance(
                     node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
                 ):
                     lines = content.splitlines()
-                     # correct 0-indexed adjustment is needed, ast uses 1-based lineno
+                    # correct 0-indexed adjustment is needed, ast uses 1-based lineno
                     start = node.lineno - 1
                     end = node.end_lineno
-                    
+
                     if start < 0 or end is None:
                         continue
+
+                    # If patch provided, only include chunks with changes
+                    if changed_lines is not None:
+                        node_lines = set(range(node.lineno, (end or node.lineno) + 1))
+                        if not node_lines.intersection(changed_lines):
+                            continue
 
                     source_segment = "\n".join(lines[start:end])
 
@@ -139,7 +156,42 @@ class CodeChunker:
             # Fallback for invalid Python syntax
             return self._chunk_simple(content)
 
-        return chunks
+        return chunks if chunks else self._chunk_simple(content)
+
+    def _extract_changed_lines(self, patch: str) -> set:
+        """Extract line numbers that were added or modified from a patch.
+
+        Args:
+            patch: Git diff patch string.
+
+        Returns:
+            Set of line numbers (1-based) that were changed.
+        """
+        changed_lines = set()
+        if not patch:
+            return changed_lines
+
+        current_line = 0
+        for line in patch.split("\n"):
+            # Parse hunk headers like @@ -15,6 +15,8 @@
+            if line.startswith("@@"):
+                try:
+                    # Extract new file line numbers from +15,8 format
+                    parts = line.split("+")
+                    if len(parts) > 1:
+                        nums = parts[1].split()[0].split(",")
+                        current_line = int(nums[0])
+                except (ValueError, IndexError):
+                    continue
+            elif line.startswith("+") and not line.startswith("+++"):
+                # Added line
+                changed_lines.add(current_line)
+                current_line += 1
+            elif not line.startswith("-"):
+                # Context line (not removed)
+                current_line += 1
+
+        return changed_lines
 
     def _chunk_simple(self, content: str) -> List[Dict[str, str]]:
         """Fallback chunker for non-supported languages or failed parsing."""

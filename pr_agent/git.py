@@ -79,10 +79,25 @@ class GitHubClient:
 
             files = []
             for file in pr.get_files():
+                # Fetch full file content from the PR head commit
+                full_content = None
+                try:
+                    if file.status != "removed":
+                        file_content = repo.get_contents(
+                            file.filename, ref=latest_commit
+                        )
+                        if hasattr(file_content, "decoded_content"):
+                            full_content = file_content.decoded_content.decode("utf-8")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not fetch full content for {file.filename}: {e}"
+                    )
+
                 files.append(
                     {
                         "filename": file.filename,
                         "patch": file.patch,
+                        "content": full_content,
                         "status": file.status,
                         "sha": latest_commit,
                     }

@@ -132,9 +132,7 @@ class PullRequestAgent:
         )
 
         # Helper node to persist retry count
-        workflow.add_node(
-            "increment_reflection_retry", self.increment_reflection_retry
-        )
+        workflow.add_node("increment_reflection_retry", self.increment_reflection_retry)
         workflow.add_edge("increment_reflection_retry", "analyze_code")
 
         # After tests, try to generate diagram before posting
@@ -173,7 +171,11 @@ class PullRequestAgent:
         for file in files:
             if not commit_sha and "sha" in file:
                 commit_sha = file["sha"]
-            chunks_data = self.rag.chunk_code(file["filename"], file["patch"])
+            # Use full content if available, otherwise fall back to patch
+            content = file.get("content") or file["patch"]
+            chunks_data = self.rag.chunk_code(
+                file["filename"], content, patch=file.get("patch")
+            )
             for c in chunks_data:
                 all_chunks.append(
                     CodeChunk(
@@ -230,10 +232,10 @@ class PullRequestAgent:
         if not context_nodes:
             return ""
 
-        formatted = "\n\n### External Context:\n"
+        formatted = "\n\n### External Context (Retrieved from Codebase):\n"
         for node in context_nodes:
-            summary = node.get("content", "").splitlines()[0]
-            formatted += f"- {node['id']} ({summary})\n"
+            formatted += f"\n--- {node['id']} ---\n"
+            formatted += node.get("content", "") + "\n"
         return formatted
 
     def self_reflect(self, state: AgentState) -> Dict[str, int]:
@@ -248,7 +250,8 @@ class PullRequestAgent:
             logger.info("Audit Result: PASS (Deterministic Quality: 10/10)")
             return {"reflection_score": 10}
 
-        prompt = textwrap.dedent(f"""
+        prompt = textwrap.dedent(
+            f"""
             Act as a Quality Auditor.
             Review Content: "{latest_findings}"
             
@@ -257,7 +260,8 @@ class PullRequestAgent:
             Low Score (1-4): Verbose, mentions nitpicks.
             
             Return ONLY the integer.
-        """)
+        """
+        )
 
         rating = self.llm.chat(
             [
@@ -309,7 +313,8 @@ class PullRequestAgent:
             return {"final_report": "No findings to verify."}
 
         findings_str = "\n".join(state.findings)
-        prompt = textwrap.dedent(f"""
+        prompt = textwrap.dedent(
+            f"""
             Act as a Senior QA Automation Engineer.
             Goal: Verify the following code review findings using a self-contained Python script.
             
@@ -325,7 +330,8 @@ class PullRequestAgent:
             Constraints:
             - Return ONLY raw Python code (no markdown).
             - Must be purely self-contained (mock standard libs if needed).
-        """)
+        """
+        )
 
         raw_response = self.llm.chat(
             [
@@ -339,7 +345,9 @@ class PullRequestAgent:
 
         test_code = raw_response.replace("```python", "").replace("```", "").strip()
 
-        logger.info(f"\n--- [Generated Verification Script] ---\n{test_code}\n---------------------------------------\n")
+        logger.info(
+            f"\n--- [Generated Verification Script] ---\n{test_code}\n---------------------------------------\n"
+        )
 
         runner_type = os.getenv("SANDBOX_TYPE", "docker")
         result = self.sandbox.run_tests(test_code, runner_type=runner_type)
@@ -379,9 +387,7 @@ class PullRequestAgent:
             logger.info(f"Diagram Syntax: INVALID ({message}) -> Requesting Fix...")
 
             fixed_code = self.llm.fix_diagram_syntax(state.diagram_code, message)
-            clean_code = (
-                fixed_code.replace("```mermaid", "").replace("```", "").strip()
-            )
+            clean_code = fixed_code.replace("```mermaid", "").replace("```", "").strip()
 
             return {
                 "diagram_code": clean_code,
